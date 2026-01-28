@@ -1,0 +1,100 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Include">
+      <UniqueIdentifier>{a76d51f6-2050-4e36-9a39-02717b01cc02}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Include\PrivateInclude">
+      <UniqueIdentifier>{be742855-391b-41c7-92a5-35341eb3b83e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Include\Rfal">
+      <UniqueIdentifier>{a3330341-fa14-44bc-a876-ef8ef62dd0b9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Include\serApi">
+      <UniqueIdentifier>{a5a9aa77-6235-465f-8885-9d0eeece5030}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="ST25R200_Console.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="includes\rfal_platform.h">
+      <Filter>Include\PrivateInclude</Filter>
+    </ClInclude>
+    <ClInclude Include="includes\rfal_features.h">
+      <Filter>Include\PrivateInclude</Filter>
+    </ClInclude>
+    <ClInclude Include="includes\rfal_chip.h">
+      <Filter>Include\Rfal</Filter>
+    </ClInclude>
+    <ClInclude Include="includes\rfal_dlma.h">
+      <Filter>Include\Rfal</Filter>
+    </ClInclude>
+    <ClInclude Include="includes\rfal_dpo.h">
+      <Filter>Include\Rfal</Filter>
+    </ClInclude>
+    <ClInclude Include="includes\rfal_isoDep.h">
+      <Filter>Include\Rfal</Filter>
+    </ClInclude>
+    <ClInclude Include="includes\rfal_nfc.h">
+      <Filter>Include\Rfal</Filter>
+    </ClInclude>
+    <ClInclude Include="includes\rfal_nfca.h">
+      <Filter>Include\Rfal</Filter>
+    </ClInclude>
+    <ClInclude Include="includes\rfal_nfcb.h">
+      <Filter>Include\Rfal</Filter>
+    </ClInclude>
+    <ClInclude Include="includes\rfal_nfcDep.h">
+      <Filter>Include\Rfal</Filter>
+    </ClInclude>
+    <ClInclude Include="includes\rfal_nfcf.h">
+      <Filter>Include\Rfal</Filter>
+    </ClInclude>
+    <ClInclude Include="includes\rfal_nfcv.h">
+      <Filter>Include\Rfal</Filter>
+    </ClInclude>
+    <ClInclude Include="includes\rfal_rf.h">
+      <Filter>Include\Rfal</Filter>
+    </ClInclude>
+    <ClInclude Include="includes\rfal_st25tb.h">
+      <Filter>Include\Rfal</Filter>
+    </ClInclude>
+    <ClInclude Include="includes\rfal_st25xv.h">
+      <Filter>Include\Rfal</Filter>
+    </ClInclude>
+    <ClInclude Include="includes\rfal_t1t.h">
+      <Filter>Include\Rfal</Filter>
+    </ClInclude>
+    <ClInclude Include="includes\rfal_utils.h">
+      <Filter>Include\Rfal</Filter>
+    </ClInclude>
+    <ClInclude Include="includes\rfal_analogConfig.h">
+      <Filter>Include\Rfal</Filter>
+    </ClInclude>
+    <ClInclude Include="includes\demo_rpt.h">
+      <Filter>Include\Rfal</Filter>
+    </ClInclude>
+    <ClInclude Include="includes\serCommon.h">
+      <Filter>Include\serApi</Filter>
+    </ClInclude>
+    <ClInclude Include="includes\serEmv.h">
+      <Filter>Include\serApi</Filter>
+    </ClInclude>
+    <ClInclude Include="includes\serHost.h">
+      <Filter>Include\serApi</Filter>
+    </ClInclude>
+    <ClInclude Include="includes\serRfal_api.h">
+      <Filter>Include\serApi</Filter>
+    </ClInclude>
+    <ClInclude Include="includes\utils.h">
+      <Filter>Include\Rfal</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>
