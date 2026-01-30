@@ -174,4 +174,8 @@ public enum SerCommandId : ushort
     RfalNfcGetStateReq = 0x2004,
     RfalNfcGetDevicesReq = 0x2006,
     RfalNfcDeactivateReq = 0x2010,
+    
+    // System error notification (unsolicited from device)
+    SysErrorReq = 0xF00C,
+    SysErrorRsp = 0xF00D,
 }

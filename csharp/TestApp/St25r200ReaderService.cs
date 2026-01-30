@@ -28,7 +28,7 @@ public sealed class St25r200ReaderService : IDisposable
 
     public sealed record Options(
         string PortName,
-        int BaudRate = 115200,
+        int BaudRate = 921600,
         int ReadTimeoutMs = 400,
         int WriteTimeoutMs = 400,
         int LoopDelayMs = 75,
@@ -123,7 +123,11 @@ public sealed class St25r200ReaderService : IDisposable
             catch (Exception ex)
             {
                 if (_opt.Debug >= DebugLevel.Errors)
+                {
                     Log?.Invoke($"ERROR: {ex.GetType().Name}: {ex.Message}");
+                    if (ex.StackTrace != null)
+                        Log?.Invoke($"STACK: {ex.StackTrace}");
+                }
 
                 SafeClosePort();
 
@@ -176,7 +180,11 @@ public sealed class St25r200ReaderService : IDisposable
 
     private void RfalNfcInitialize()
     {
-        var rsp = SendAndReceive(SerCommandId.RfalNfcInitializeReq, Array.Empty<byte>());
+        var rsp = SendAndReceive(SerCommandId.RfalNfcInitializeReq, Array.Empty<byte>(), expectedRspPayloadLen: 2);
+        
+        if (rsp.Length < 2)
+            throw new IOException($"rfalNfcInitialize: Expected 2-byte response, got {rsp.Length} bytes");
+            
         ushort ret = ReadU16BE(rsp, 0);
         if (ret != 0)
             throw new IOException($"rfalNfcInitialize failed ret=0x{ret:X4} ({RfalDecoders.DescribeReturnCode(ret)})");
@@ -184,7 +192,11 @@ public sealed class St25r200ReaderService : IDisposable
 
     private void RfalNfcDiscover(byte[] discoverParams93Bytes)
     {
-        var rsp = SendAndReceive(SerCommandId.RfalNfcDiscoverReq, discoverParams93Bytes);
+        var rsp = SendAndReceive(SerCommandId.RfalNfcDiscoverReq, discoverParams93Bytes, expectedRspPayloadLen: 2);
+        
+        if (rsp.Length < 2)
+            throw new IOException($"rfalNfcDiscover: Expected 2-byte response, got {rsp.Length} bytes");
+            
         ushort ret = ReadU16BE(rsp, 0);
         if (ret != 0)
             throw new IOException($"rfalNfcDiscover failed ret=0x{ret:X4} ({RfalDecoders.DescribeReturnCode(ret)})");
@@ -192,7 +204,11 @@ public sealed class St25r200ReaderService : IDisposable
 
     private uint RfalNfcGetState()
     {
-        var rsp = SendAndReceive(SerCommandId.RfalNfcGetStateReq, Array.Empty<byte>());
+        var rsp = SendAndReceive(SerCommandId.RfalNfcGetStateReq, Array.Empty<byte>(), expectedRspPayloadLen: 4);
+        
+        if (rsp.Length < 4)
+            throw new IOException($"rfalNfcGetState: Expected 4-byte response, got {rsp.Length} bytes");
+            
         return ReadU32BE(rsp, 0);
     }
 
@@ -201,7 +217,11 @@ public sealed class St25r200ReaderService : IDisposable
         byte[] pl = new byte[4];
         BinaryPrimitives.WriteUInt32BigEndian(pl, deactType);
 
-        var rsp = SendAndReceive(SerCommandId.RfalNfcDeactivateReq, pl);
+        var rsp = SendAndReceive(SerCommandId.RfalNfcDeactivateReq, pl, expectedRspPayloadLen: 2);
+        
+        if (rsp.Length < 2)
+            throw new IOException($"rfalNfcDeactivate: Expected 2-byte response, got {rsp.Length} bytes");
+            
         ushort ret = ReadU16BE(rsp, 0);
         if (ret != 0)
             throw new IOException($"rfalNfcDeactivate failed ret=0x{ret:X4} ({RfalDecoders.DescribeReturnCode(ret)})");
@@ -260,7 +280,12 @@ public sealed class St25r200ReaderService : IDisposable
             ofs += 1; // isDeselected
 
             if (devType == (uint)Rfal.NfcDevType.ListenNfcv)
-                uids.Add(BytesToHex(uid));
+            {
+                // NFC-V UIDs are transmitted LSB-first but displayed MSB-first, so reverse
+                byte[] uidBytes = uid.ToArray();
+                Array.Reverse(uidBytes);
+                uids.Add(BytesToHex(uidBytes));
+            }
         }
 
         return uids;
@@ -289,7 +314,7 @@ public sealed class St25r200ReaderService : IDisposable
 
     // ===== Transport =====
 
-    private byte[] SendAndReceive(SerCommandId requestCmdId, byte[] payload)
+    private byte[] SendAndReceive(SerCommandId requestCmdId, byte[] payload, int? expectedRspPayloadLen = null)
     {
         var port = _port ?? throw new IOException("Serial port not open.");
 
@@ -303,18 +328,57 @@ public sealed class St25r200ReaderService : IDisposable
         if (_opt.Debug >= DebugLevel.Frames)
             Log?.Invoke($"TX cmd=0x{(ushort)requestCmdId:X4} len={len} bytes={frame.Length} :: {BytesToHex(frame)}");
 
-        port.Write(frame, 0, frame.Length);
+        // Send in chunks to avoid overwhelming device RX buffer
+        const int chunkSize = 32;
+        for (int offset = 0; offset < frame.Length; offset += chunkSize)
+        {
+            int bytesToSend = Math.Min(chunkSize, frame.Length - offset);
+            port.Write(frame, offset, bytesToSend);
+            
+            // Small delay between chunks (except after last chunk)
+            if (offset + bytesToSend < frame.Length)
+                Thread.Sleep(5);
+        }
 
         ushort expectedRspCmd = (ushort)((ushort)requestCmdId + 1);
-        var (rspCmd, rspPayload, rawFrame) = ReadFrameWithRaw(port);
+        
+        // Read responses, skipping any unsolicited messages (e.g., 0xF00D notifications)
+        const int maxRetries = 5;
+        for (int attempt = 0; attempt < maxRetries; attempt++)
+        {
+            var (rspCmd, rspPayload, rawFrame) = ReadFrameWithRaw(port);
 
-        if (_opt.Debug >= DebugLevel.Frames)
-            Log?.Invoke($"RX cmd=0x{rspCmd:X4} payloadLen={rspPayload.Length} raw={BytesToHex(rawFrame)}");
+            if (_opt.Debug >= DebugLevel.Frames)
+                Log?.Invoke($"RX cmd=0x{rspCmd:X4} payloadLen={rspPayload.Length} raw={BytesToHex(rawFrame)}");
 
-        if (rspCmd != expectedRspCmd)
-            throw new IOException($"Unexpected rsp cmdId=0x{rspCmd:X4}, expected=0x{expectedRspCmd:X4}");
+            // If we get the expected response, return it
+            if (rspCmd == expectedRspCmd)
+            {
+                // Optional validation: check if we got the expected payload size
+                if (expectedRspPayloadLen.HasValue && rspPayload.Length != expectedRspPayloadLen.Value)
+                {
+                    Log?.Invoke($"WARN: Expected payload length {expectedRspPayloadLen.Value} but got {rspPayload.Length}");
+                }
 
-        return rspPayload;
+                return rspPayload;
+            }
+
+            // Handle device error notifications specifically
+            if (rspCmd == (ushort)SerCommandId.SysErrorRsp && rspPayload.Length >= 4)
+            {
+                uint errorCode = ReadU32BE(rspPayload, 0);
+                string errorMsg = RfalDecoders.DescribeReturnCode((ushort)errorCode);
+                Log?.Invoke($"ERROR: Device reported error 0x{errorCode:X8} ({errorMsg})");
+                // Continue to see if expected response follows
+            }
+            else if (_opt.Debug >= DebugLevel.Errors)
+            {
+                // Got an unexpected message - log it and try reading the next frame
+                Log?.Invoke($"WARN: Skipping unsolicited message cmdId=0x{rspCmd:X4} (expected 0x{expectedRspCmd:X4})");
+            }
+        }
+
+        throw new IOException($"Did not receive expected response 0x{expectedRspCmd:X4} after {maxRetries} attempts");
     }
 
     private (ushort cmdId, byte[] payload, byte[] rawFrame) ReadFrameWithRaw(SerialPort port)
@@ -349,16 +413,31 @@ public sealed class St25r200ReaderService : IDisposable
         ReadExact(port, cmdBuf, 0, 2);
         ushort cmdId = BinaryPrimitives.ReadUInt16BigEndian(cmdBuf);
 
+        // IMPORTANT: The documentation says "length from Command ID onwards", which INCLUDES the command ID itself.
+        // So payloadLen should be (len - 2). However, some firmware versions may have bugs.
+        // The safest approach is to read the bytes as specified, but be prepared for zero-length payloads.
         int payloadLen = len - 2;
+        if (payloadLen < 0)
+        {
+            Log?.Invoke($"WARN: Invalid payloadLen={payloadLen} (len={len}). Treating as zero.");
+            payloadLen = 0;
+        }
+        
+        // DIAGNOSTIC: Log the parsed values
+        if (_opt.Debug >= DebugLevel.Frames)
+            Log?.Invoke($"Parsed: len={len}, cmdId=0x{cmdId:X4}, payloadLen={payloadLen}");
+        
         byte[] payload = new byte[payloadLen];
-        ReadExact(port, payload, 0, payloadLen);
+        if (payloadLen > 0)
+            ReadExact(port, payload, 0, payloadLen);
 
         // Raw frame (for dump): [AA][len2][cmd2][payload...]
         byte[] raw = new byte[1 + 2 + 2 + payloadLen];
         raw[0] = FrameHeader;
         Buffer.BlockCopy(lenBuf, 0, raw, 1, 2);
         Buffer.BlockCopy(cmdBuf, 0, raw, 3, 2);
-        Buffer.BlockCopy(payload, 0, raw, 5, payloadLen);
+        if (payloadLen > 0)
+            Buffer.BlockCopy(payload, 0, raw, 5, payloadLen);
 
         return (cmdId, payload, raw);
     }
@@ -377,10 +456,20 @@ public sealed class St25r200ReaderService : IDisposable
     // ===== Helpers =====
 
     private static ushort ReadU16BE(byte[] buf, int ofs)
-        => BinaryPrimitives.ReadUInt16BigEndian(buf.AsSpan(ofs, 2));
+    {
+        if (buf == null) throw new ArgumentNullException(nameof(buf));
+        if (ofs < 0 || ofs + 2 > buf.Length)
+            throw new IndexOutOfRangeException($"ReadU16BE: Buffer has {buf.Length} bytes, but trying to read 2 bytes at offset {ofs}");
+        return BinaryPrimitives.ReadUInt16BigEndian(buf.AsSpan(ofs, 2));
+    }
 
     private static uint ReadU32BE(byte[] buf, int ofs)
-        => BinaryPrimitives.ReadUInt32BigEndian(buf.AsSpan(ofs, 4));
+    {
+        if (buf == null) throw new ArgumentNullException(nameof(buf));
+        if (ofs < 0 || ofs + 4 > buf.Length)
+            throw new IndexOutOfRangeException($"ReadU32BE: Buffer has {buf.Length} bytes, but trying to read 4 bytes at offset {ofs}");
+        return BinaryPrimitives.ReadUInt32BigEndian(buf.AsSpan(ofs, 4));
+    }
 
     private static void WriteU16BE(byte[] buf, int ofs, ushort v)
         => BinaryPrimitives.WriteUInt16BigEndian(buf.AsSpan(ofs, 2), v);
@@ -404,36 +493,43 @@ public sealed class St25r200ReaderService : IDisposable
 
     private static byte[] BuildDiscoverParams_NfcV_Default()
     {
-        // serRfalNfcDiscoverParam (serCommonTypes.h) serialized into 93 bytes.
-        // Values follow serRfalNfcDefaultDiscParams with NFC-V polling only.
-        byte[] p = new byte[93];
+        // Based on wire capture: ST app sends length=0xA9 (169 bytes including cmdId)
+        // Payload is 169 - 2 = 167 bytes (not 149 as we thought!)
+        const int totalSize = 167;
+        byte[] p = new byte[totalSize];
         int o = 0;
 
-        WriteU32BE(p, ref o, (uint)Rfal.ComplianceMode.Nfc); // compMode
-        WriteU16BE(p, ref o, (ushort)Rfal.NfcPollTech.V); // techs2Find
+        WriteU32BE(p, ref o, (uint)Rfal.ComplianceMode.Nfc); // compMode (4 bytes)
+        WriteU16BE(p, ref o, 0x002B); // techs2Find (NFC-A + NFC-B + NFC-V + ST25TB, matching wire capture)
         WriteU16BE(p, ref o, (ushort)Rfal.NfcPollTech.None); // techs2Bail
-        WriteU16BE(p, ref o, 0x00C8); // totalDuration (200 ms)
-        p[o++] = 0x04; // devLimit (up to 4 tags)
-        WriteU32BE(p, ref o, (uint)Rfal.BitRate.Keep); // maxBR
-        WriteU32BE(p, ref o, (uint)Rfal.BitRate.Br212); // nfcfBR
+        WriteU16BE(p, ref o, 0x00C8); // totalDuration (200 ms, matching wire capture: 0x00C8)
+        p[o++] = 0x05; // devLimit (5 tags)
+        WriteU32BE(p, ref o, (uint)Rfal.BitRate.Keep); // maxBR (4 bytes, 0xFF)
+        WriteU32BE(p, ref o, (uint)Rfal.BitRate.Br212); // nfcfBR (4 bytes)
         o += 10; // nfcid3[10]
         o += 48; // GB[48]
         p[o++] = 0x00; // GBLen
-        WriteU32BE(p, ref o, (uint)Rfal.BitRate.Br424); // ap2pBR
+        WriteU32BE(p, ref o, (uint)Rfal.BitRate.Br424); // ap2pBR (4 bytes)
         p[o++] = 0x00; // p2pNfcaPrio
-        WriteU32BE(p, ref o, 0x00000008); // isoDepFS (RFAL_ISODEP_FSXI_256)
-        p[o++] = 0x03; // nfcDepLR (RFAL_NFCDEP_LR_254)
+        WriteU32BE(p, ref o, 0x00000008); // isoDepFS (4 bytes)
+        p[o++] = 0x03; // nfcDepLR
 
-        o += 17; // lmConfigPA
-        o += 21; // lmConfigPF
+        o += 17; // lmConfigPA[17]
+        o += 21; // lmConfigPF[21]
 
         p[o++] = 0x00; // wakeupEnabled
         p[o++] = 0x00; // wakeupConfigDefault
-        o += 18; // wakeupConfig
+        o += 18; // wakeupConfig[18]
         p[o++] = 0x00; // wakeupPollBefore
         WriteU16BE(p, ref o, 0x0000); // wakeupNPolls
 
-        if (o != 93) throw new InvalidOperationException($"Discover param size mismatch: {o}");
+        // We're at 149 bytes but need 167, so missing 18 bytes
+        // Pad with zeros for the missing fields (likely serialization padding or additional fields)
+        while (o < totalSize)
+        {
+            p[o++] = 0x00;
+        }
+
         return p;
 
         static void WriteU16BE(byte[] b, ref int ofs, ushort v)

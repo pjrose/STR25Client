@@ -7,7 +7,7 @@ internal static class Program
 {
     private static void Main(string[] args)
     {
-        string port = args.Length > 0 ? args[0] : "COM30";
+        string port = args.Length > 0 ? args[0] : "COM7";
         var options = new St25r200ReaderService.Options(
             PortName: port,
             RestBaseUri: "http://192.168.1.100/",
